@@ -61,7 +61,7 @@ function validateForm(f: VehicleForm): FormErrors {
   return errors;
 }
 
-export function VehiclesScreen({ data, selectedVehicleId, onSelectVehicle, onSave, dirty, setDirty }: Props) {
+export function VehiclesScreen({ data, selectedVehicleId, onSelectVehicle, onSave, setDirty }: Props) {
   const toast = useToast();
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
