@@ -1,6 +1,7 @@
 {
   "name": "Pitstop Log",
-  "short_name": "Pitstop Log",
+  "short_name": "Pitstop",
+  "description": "Track fuel fill-ups, consumption and running costs for your vehicles.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",
