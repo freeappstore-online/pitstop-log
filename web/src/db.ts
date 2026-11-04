@@ -2,7 +2,7 @@
  * Device-local persistence via @freeappstore/sdk/persist (IndexedDB).
  * All reads/writes go through validated helpers; errors are surfaced to callers.
  */
-import { openStore, putRecord, getPreference, setPreference } from "@freeappstore/sdk/persist";
+import { openStore, getRecord, putRecord, getPreference, setPreference, type LocalStore } from "@freeappstore/sdk/persist";
 import type { AppData, Vehicle, FuelEntry, ExpenseEntry } from "./types";
 import { SCHEMA_VERSION } from "./types";
 
@@ -98,21 +98,29 @@ function validateAppData(raw: unknown): AppData {
 
 export type SaveResult = { ok: true } | { ok: false; reason: string };
 
-let _store: Awaited<ReturnType<typeof openStore>> | null = null;
+let _store: LocalStore | null = null;
+let opening: Promise<LocalStore> | null = null;
 
-async function getStore() {
-  if (!_store) {
-    const result = await openStore(STORE_NAME);
-    if (!result.ok) throw new Error(result.reason ?? "Failed to open IndexedDB store");
-    _store = result;
+async function getStore(): Promise<LocalStore> {
+  if (_store) return _store;
+  if (!opening) {
+    opening = (async () => {
+      const result = await openStore({ namespace: STORE_NAME, version: 1 });
+      if (!result.ok) throw new Error(result.detail ?? result.reason);
+      _store = result.value;
+      return result.value;
+    })();
   }
-  return _store;
+  try { return await opening; }
+  finally { opening = null; }
 }
 
 export async function loadData(): Promise<AppData> {
   try {
     const store = await getStore();
-    const rec = await store.get(RECORD_KEY);
+    const result = await getRecord<AppData>(store, RECORD_KEY);
+    if (!result.ok) throw new Error(result.detail ?? result.reason);
+    const rec = result.value;
     if (!rec) {
       return { vehicles: [], fuelEntries: [], expenseEntries: [], schemaVersion: SCHEMA_VERSION };
     }
@@ -147,7 +155,7 @@ const PREF_SELECTED_VEHICLE = "pitstop.selectedVehicleId";
 
 export async function loadSelectedVehicleId(): Promise<string | null> {
   try {
-    const r = await getPreference<string>(PREF_SELECTED_VEHICLE);
+    const r = await getPreference<string>(STORE_NAME, PREF_SELECTED_VEHICLE);
     return r.ok && r.value ? r.value : null;
   } catch {
     return null;
@@ -156,7 +164,7 @@ export async function loadSelectedVehicleId(): Promise<string | null> {
 
 export async function saveSelectedVehicleId(id: string | null): Promise<void> {
   try {
-    await setPreference(PREF_SELECTED_VEHICLE, id ?? "");
+    await setPreference(STORE_NAME, PREF_SELECTED_VEHICLE, id ?? "");
   } catch {
     // non-critical
   }
