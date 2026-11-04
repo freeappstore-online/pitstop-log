@@ -66,8 +66,8 @@ function validateFuelForm(f: FuelForm, vehicleId: string, data: AppData, editing
   const errs: FuelErrors = {};
   if (!f.date) { errs.date = "Date is required"; }
 
-  const odo = parseFloat(f.odometer);
-  if (f.odometer.trim() === "" || isNaN(odo) || odo < 0) {
+  const odo = Number(f.odometer);
+  if (f.odometer.trim() === "" || !Number.isFinite(odo) || odo < 0) {
     errs.odometer = "Enter a valid odometer reading (km)";
   } else {
     // Check ordering: must be greater than the previous entry for this vehicle (excluding self)
@@ -87,13 +87,13 @@ function validateFuelForm(f: FuelForm, vehicleId: string, data: AppData, editing
     }
   }
 
-  const litres = parseFloat(f.litres);
-  if (f.litres.trim() === "" || isNaN(litres) || litres <= 0) {
+  const litres = Number(f.litres);
+  if (f.litres.trim() === "" || !Number.isFinite(litres) || litres <= 0) {
     errs.litres = "Enter a positive number of litres";
   }
 
-  const cost = parseFloat(f.totalCost);
-  if (f.totalCost.trim() === "" || isNaN(cost) || cost <= 0) {
+  const cost = Number(f.totalCost);
+  if (f.totalCost.trim() === "" || !Number.isFinite(cost) || cost <= 0) {
     errs.totalCost = "Enter a positive total cost";
   }
 
@@ -137,8 +137,8 @@ function validateExpenseForm(f: ExpenseForm): ExpenseErrors {
   const errs: ExpenseErrors = {};
   if (!f.date) errs.date = "Date is required";
   if (!f.category) errs.category = "Category is required";
-  const amount = parseFloat(f.amount);
-  if (f.amount.trim() === "" || isNaN(amount) || amount <= 0) {
+  const amount = Number(f.amount);
+  if (f.amount.trim() === "" || !Number.isFinite(amount) || amount <= 0) {
     errs.amount = "Enter a positive amount";
   }
   return errs;
@@ -195,9 +195,9 @@ export function LogScreen({ data, selectedVehicleId, onSave, setDirty, onNavigat
       id: editingFuelId ?? uid(),
       vehicleId: selectedVehicleId,
       date: fuelForm.date,
-      odometer: parseFloat(fuelForm.odometer),
-      litres: parseFloat(fuelForm.litres),
-      totalCost: parseFloat(fuelForm.totalCost),
+      odometer: Number(fuelForm.odometer),
+      litres: Number(fuelForm.litres),
+      totalCost: Number(fuelForm.totalCost),
       fullTank: fuelForm.fullTank,
       notes: fuelForm.notes.trim(),
     };
@@ -258,7 +258,7 @@ export function LogScreen({ data, selectedVehicleId, onSave, setDirty, onNavigat
       vehicleId: selectedVehicleId,
       date: expenseForm.date,
       category: expenseForm.category as ExpenseEntry["category"],
-      amount: parseFloat(expenseForm.amount),
+      amount: Number(expenseForm.amount),
       description: expenseForm.description.trim(),
     };
 
@@ -484,7 +484,7 @@ export function LogScreen({ data, selectedVehicleId, onSave, setDirty, onNavigat
       {showFuelForm && (
         <Modal title={editingFuelId ? "Edit Fuel Entry" : "Add Fuel Entry"} onClose={() => { setShowFuelForm(false); setDirty(false); }}>
           <form id={fuelFormId} onSubmit={handleFuelSubmit} noValidate className="flex flex-col gap-4">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <FormField label="Date" error={fuelErrors.date} required>
                 <input
                   type="date"
@@ -505,7 +505,7 @@ export function LogScreen({ data, selectedVehicleId, onSave, setDirty, onNavigat
                 />
               </FormField>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <FormField label="Litres" error={fuelErrors.litres} required>
                 <input
                   className={inputClass}
@@ -563,7 +563,7 @@ export function LogScreen({ data, selectedVehicleId, onSave, setDirty, onNavigat
       {showExpenseForm && (
         <Modal title={editingExpenseId ? "Edit Expense" : "Add Expense"} onClose={() => { setShowExpenseForm(false); setDirty(false); }}>
           <form id={expFormId} onSubmit={handleExpenseSubmit} noValidate className="flex flex-col gap-4">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <FormField label="Date" error={expenseErrors.date} required>
                 <input
                   type="date"

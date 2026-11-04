@@ -53,8 +53,8 @@ function validateForm(f: VehicleForm): FormErrors {
   if (!f.make.trim()) errors.make = "Make is required";
   if (!f.model.trim()) errors.model = "Model is required";
   if (f.year.trim()) {
-    const y = parseInt(f.year, 10);
-    if (isNaN(y) || y < 1886 || y > new Date().getFullYear() + 2) {
+    const y = Number(f.year);
+    if (!Number.isInteger(y) || y < 1886 || y > new Date().getFullYear() + 1) {
       errors.year = "Enter a valid year (e.g. 2019)";
     }
   }
@@ -98,7 +98,7 @@ export function VehiclesScreen({ data, selectedVehicleId, onSelectVehicle, onSav
       return;
     }
     setSaving(true);
-    const year = form.year.trim() ? parseInt(form.year, 10) : null;
+    const year = form.year.trim() ? Number(form.year) : null;
     let newData: AppData;
 
     if (editingId) {
@@ -264,7 +264,7 @@ export function VehiclesScreen({ data, selectedVehicleId, onSelectVehicle, onSav
                 required
               />
             </FormField>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <FormField label="Make" error={errors.make} required>
                 <input
                   className={inputClass}
@@ -286,7 +286,7 @@ export function VehiclesScreen({ data, selectedVehicleId, onSelectVehicle, onSav
                 />
               </FormField>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <FormField label="Year" error={errors.year}>
                 <input
                   className={inputClass}
