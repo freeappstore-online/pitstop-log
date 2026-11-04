@@ -5,6 +5,7 @@
 import { openStore, getRecord, putRecord, getPreference, setPreference, type LocalStore } from "@freeappstore/sdk/persist";
 import type { AppData, Vehicle, FuelEntry, ExpenseEntry } from "./types";
 import { SCHEMA_VERSION } from "./types";
+import { exportBackup as makeBackup, previewBackup, importBackup, shareOrDownloadBackup, type BackupSchema } from "@freeappstore/sdk/backup";
 
 const STORE_NAME = "pitstop";
 const RECORD_KEY = "appdata";
@@ -63,36 +64,45 @@ function validateExpenseEntry(e: unknown): e is ExpenseEntry {
   );
 }
 
-function validateAppData(raw: unknown): AppData {
-  if (!raw || typeof raw !== "object") {
-    throw new Error("Invalid data: not an object");
-  }
-  const o = raw as Record<string, unknown>;
-
-  if (!Array.isArray(o.vehicles)) throw new Error("Invalid data: vehicles missing");
-  if (!Array.isArray(o.fuelEntries)) throw new Error("Invalid data: fuelEntries missing");
-  if (!Array.isArray(o.expenseEntries)) throw new Error("Invalid data: expenseEntries missing");
-
-  const vehicles = o.vehicles.filter(validateVehicle);
-  const fuelEntries = o.fuelEntries.filter(validateFuelEntry);
-  const expenseEntries = o.expenseEntries.filter(validateExpenseEntry);
-
-  const dropped =
-    (o.vehicles.length - vehicles.length) +
-    (o.fuelEntries.length - fuelEntries.length) +
-    (o.expenseEntries.length - expenseEntries.length);
-
-  if (dropped > 0) {
-    console.warn(`[pitstop] Dropped ${dropped} invalid record(s) during validation`);
-  }
-
-  return {
-    vehicles,
-    fuelEntries,
-    expenseEntries,
-    schemaVersion: SCHEMA_VERSION,
-  };
+function validDate(value: unknown): boolean {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+    Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
 }
+
+function validateAppData(raw: unknown): AppData {
+  if (!raw || typeof raw !== "object") throw new Error("Invalid data: expected an object.");
+  const o = raw as Record<string, unknown>;
+  if (o.schemaVersion !== SCHEMA_VERSION) throw new Error("Unsupported data version.");
+  if (!Array.isArray(o.vehicles) || !o.vehicles.every(validateVehicle) ||
+      !Array.isArray(o.fuelEntries) || !o.fuelEntries.every(validateFuelEntry) ||
+      !Array.isArray(o.expenseEntries) || !o.expenseEntries.every(validateExpenseEntry)) {
+    throw new Error("Invalid records. No data was imported.");
+  }
+  const vehicles = o.vehicles as Vehicle[], fuelEntries = o.fuelEntries as FuelEntry[],
+    expenseEntries = o.expenseEntries as ExpenseEntry[];
+  for (const rows of [vehicles, fuelEntries, expenseEntries]) {
+    if (new Set(rows.map(r => r.id)).size !== rows.length) throw new Error("Duplicate record IDs.");
+  }
+  const ids = new Set(vehicles.map(v => v.id));
+  if (vehicles.some(v => !v.name.trim() || (v.year !== null && (!Number.isInteger(v.year) || v.year < 1886 || v.year > new Date().getFullYear() + 1)))) throw new Error("Invalid vehicle.");
+  if (fuelEntries.some(e => !ids.has(e.vehicleId) || !validDate(e.date)) ||
+      expenseEntries.some(e => !ids.has(e.vehicleId) || !validDate(e.date) ||
+      !["service","tyres","insurance","registration","parking","tolls","repairs","cleaning","other"].includes(e.category))) {
+    throw new Error("Invalid date, category or vehicle reference.");
+  }
+  for (const id of ids) {
+    const entries = fuelEntries.filter(e => e.vehicleId === id).sort((x,y) => x.date.localeCompare(y.date) || x.odometer-y.odometer);
+    if (entries.some((e,i) => i > 0 && e.odometer < entries[i-1].odometer)) throw new Error("Odometers must follow date order.");
+  }
+  return { vehicles, fuelEntries, expenseEntries, schemaVersion: SCHEMA_VERSION };
+}
+
+const backupSchema: BackupSchema<AppData> = {
+  supportedVersions: [SCHEMA_VERSION],
+  validate: (value): value is AppData => { try { validateAppData(value); return true; } catch { return false; } },
+  counts: data => ({ vehicles: data.vehicles.length, fuelEntries: data.fuelEntries.length, expenses: data.expenseEntries.length }),
+};
+const MAX_BACKUP_BYTES = 2 * 1024 * 1024;
 
 // ─── Store helpers ────────────────────────────────────────────────────────────
 
@@ -134,6 +144,7 @@ export async function loadData(): Promise<AppData> {
 
 export async function saveData(data: AppData): Promise<SaveResult> {
   try {
+    validateAppData(data);
     const store = await getStore();
     const result = await putRecord(store, RECORD_KEY, {
       ...data,
@@ -173,43 +184,67 @@ export async function saveSelectedVehicleId(id: string | null): Promise<void> {
 // ─── Backup / export ──────────────────────────────────────────────────────────
 
 export interface BackupPayload {
-  appId: string;
-  exportedAt: string;
-  schemaVersion: number;
-  data: AppData;
+  appId: string; exportedAt: string; schemaVersion: number; data: AppData;
+}
+export type ParsedBackup = { ok: true; payload: BackupPayload; raw: string } | { ok: false; reason: string };
+
+export async function exportBackup(data: AppData): Promise<string> {
+  validateAppData(data);
+  const result = await makeBackup({ appId: "pitstop-log", data, version: SCHEMA_VERSION, maxBytes: MAX_BACKUP_BYTES });
+  if (!result.ok) throw new Error(result.detail ?? "Backup export failed.");
+  return JSON.stringify(result.value, null, 2);
 }
 
-export function exportBackup(data: AppData): string {
-  const payload: BackupPayload = {
-    appId: "pitstop-log",
-    exportedAt: new Date().toISOString(),
-    schemaVersion: SCHEMA_VERSION,
-    data,
-  };
-  return JSON.stringify(payload, null, 2);
+export async function downloadBackup(data: AppData): Promise<void> {
+  const envelope = JSON.parse(await exportBackup(data));
+  const result = await shareOrDownloadBackup({ envelope });
+  if (!result.ok) throw new Error(result.detail ?? "Backup download failed.");
+  if (result.value.method === "text") throw new Error("This browser cannot download a file. Please use a browser with file downloads.");
 }
 
-export function parseBackup(raw: string): { ok: true; payload: BackupPayload } | { ok: false; reason: string } {
+export async function parseBackup(raw: string): Promise<ParsedBackup> {
   try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    if (parsed.appId !== "pitstop-log") {
-      return { ok: false, reason: "This backup is not from Pitstop Log." };
+    if (new TextEncoder().encode(raw).byteLength > MAX_BACKUP_BYTES) throw new Error("Backup exceeds the 2 MB limit.");
+    const parsed = JSON.parse(raw);
+    if (!parsed || parsed.appId !== "pitstop-log") throw new Error("This backup is not from Pitstop Log.");
+    // Migrate the app's original v1 exports after strict validation; no records are discarded.
+    let envelope = parsed;
+    if (!parsed.format) {
+      if (parsed.schemaVersion !== SCHEMA_VERSION) throw new Error("Unsupported backup version.");
+      const data = validateAppData(parsed.data);
+      const converted = await makeBackup({ appId: "pitstop-log", data, version: SCHEMA_VERSION,
+        exportedAt: parsed.exportedAt || undefined, maxBytes: MAX_BACKUP_BYTES });
+      if (!converted.ok) throw new Error(converted.detail ?? "Invalid legacy backup.");
+      envelope = converted.value;
     }
-    if (!parsed.data || typeof parsed.data !== "object") {
-      return { ok: false, reason: "Backup has no data field." };
-    }
-    const data = validateAppData(parsed.data);
-    return {
-      ok: true,
-      payload: {
-        appId: "pitstop-log",
-        exportedAt: isString(parsed.exportedAt) ? parsed.exportedAt : "",
-        schemaVersion: isNumber(parsed.schemaVersion) ? parsed.schemaVersion : SCHEMA_VERSION,
-        data,
-      },
-    };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, reason: `Could not parse backup: ${msg}` };
+    const inspected = await previewBackup(envelope, backupSchema, MAX_BACKUP_BYTES);
+    if (!inspected.ok) throw new Error(inspected.detail ?? "Invalid backup.");
+    return { ok: true, raw: JSON.stringify(envelope), payload: { appId: "pitstop-log",
+      exportedAt: envelope.exportedAt, schemaVersion: SCHEMA_VERSION, data: inspected.value.data } };
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : "Could not read backup." };
   }
+}
+
+export async function restoreBackup(preview: Extract<ParsedBackup, {ok: true}>,
+  mode: "merge" | "replace", save: (data: AppData) => Promise<SaveResult>): Promise<SaveResult> {
+  let snapshot: AppData;
+  const write = async (data: AppData) => { const result = await save(data); if (!result.ok) throw new Error(result.reason); };
+  const result = await importBackup({
+    raw: preview.raw, mode, schema: backupSchema, maxBytes: MAX_BACKUP_BYTES,
+    snapshot: async () => { snapshot = await loadData(); return snapshot; },
+    apply: async (incoming, selectedMode) => {
+      const mergeRows = <T extends {id: string}>(old: T[], added: T[]) => {
+        const existing = new Set(old.map(r => r.id)); return [...old, ...added.filter(r => !existing.has(r.id))];
+      };
+      const next = selectedMode === "replace" ? incoming : {
+        schemaVersion: SCHEMA_VERSION, vehicles: mergeRows(snapshot.vehicles, incoming.vehicles),
+        fuelEntries: mergeRows(snapshot.fuelEntries, incoming.fuelEntries),
+        expenseEntries: mergeRows(snapshot.expenseEntries, incoming.expenseEntries),
+      };
+      validateAppData(next); await write(next);
+    },
+    restore: write,
+  });
+  return result.ok ? {ok: true} : {ok: false, reason: result.detail ?? "Import failed. Check your data before retrying."};
 }

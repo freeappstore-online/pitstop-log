@@ -71,7 +71,7 @@ function AppInner() {
   // ── Navigation ───────────────────────────────────────────────────────────────
   const navigate = useCallback((href: string) => {
     window.history.pushState(null, "", href);
-    setPath(href);
+    setPath(window.location.pathname);
   }, []);
 
   useEffect(() => {

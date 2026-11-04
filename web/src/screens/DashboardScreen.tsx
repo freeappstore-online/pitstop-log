@@ -2,7 +2,7 @@ import { useState } from "react";
 import { PageHeader, useToast } from "@freeappstore/sdk/ui";
 import type { AppData } from "../types";
 import type { SaveResult } from "../db";
-import { exportBackup, parseBackup } from "../db";
+import { downloadBackup, parseBackup, restoreBackup } from "../db";
 import { computeVehicleStats, fmt, fmtCurrency } from "../stats";
 import { buildSampleData } from "../sampleData";
 import { StatCard } from "../components/StatCard";
@@ -21,8 +21,8 @@ type ImportStep = "idle" | "preview";
 interface ImportState {
   step: ImportStep;
   parseError: string | null;
-  preview: ReturnType<typeof parseBackup> | null;
-  mergeMode: "replace" | "merge";
+  preview: Awaited<ReturnType<typeof parseBackup>> | null;
+  mergeMode: "replace" | "merge" | "";
 }
 
 export function DashboardScreen({ data, selectedVehicleId, onSave, onNavigateVehicles, onNavigateLog }: Props) {
@@ -30,7 +30,7 @@ export function DashboardScreen({ data, selectedVehicleId, onSave, onNavigateVeh
   const [showBackup, setShowBackup] = useState(false);
   const [showSampleConfirm, setShowSampleConfirm] = useState(false);
   const [importState, setImportState] = useState<ImportState>({
-    step: "idle", parseError: null, preview: null, mergeMode: "replace",
+    step: "idle", parseError: null, preview: null, mergeMode: "",
   });
   const [importing, setImporting] = useState(false);
 
@@ -64,16 +64,9 @@ export function DashboardScreen({ data, selectedVehicleId, onSave, onNavigateVeh
 
   // ── Export ─────────────────────────────────────────────────────────────────
 
-  const handleExport = () => {
-    const json = exportBackup(data);
-    const blob = new Blob([json], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `pitstop-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.show("Backup exported", { variant: "success" });
+  const handleExport = async () => {
+    try { await downloadBackup(data); toast.show("Backup exported", { variant: "success" }); }
+    catch (error) { toast.show(error instanceof Error ? error.message : "Export failed", {variant: "error"}); }
   };
 
   // ── Import ─────────────────────────────────────────────────────────────────
@@ -81,10 +74,14 @@ export function DashboardScreen({ data, selectedVehicleId, onSave, onNavigateVeh
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      setImportState({step: "preview", parseError: "Backup exceeds the 2 MB limit.", preview: null, mergeMode: ""});
+      e.target.value = ""; return;
+    }
     const reader = new FileReader();
-    reader.onload = ev => {
+    reader.onload = async ev => {
       const raw = ev.target?.result as string;
-      const parsed = parseBackup(raw);
+      const parsed = await parseBackup(raw);
       setImportState(s => ({
         ...s,
         parseError: parsed.ok ? null : parsed.reason,
@@ -92,6 +89,7 @@ export function DashboardScreen({ data, selectedVehicleId, onSave, onNavigateVeh
         step: "preview",
       }));
     };
+    reader.onerror = () => setImportState({step: "preview", parseError: "Could not read this file.", preview: null, mergeMode: ""});
     reader.readAsText(file);
     e.target.value = "";
   };
@@ -99,33 +97,9 @@ export function DashboardScreen({ data, selectedVehicleId, onSave, onNavigateVeh
   const handleImportConfirm = async () => {
     if (!importState.preview || !importState.preview.ok) return;
     setImporting(true);
-    const incoming = importState.preview.payload.data;
-
-    let newData: AppData;
-    if (importState.mergeMode === "replace") {
-      newData = incoming;
-    } else {
-      const existingVehicleIds = new Set(data.vehicles.map(v => v.id));
-      const existingFuelIds = new Set(data.fuelEntries.map(e => e.id));
-      const existingExpIds = new Set(data.expenseEntries.map(e => e.id));
-      newData = {
-        ...data,
-        vehicles: [
-          ...data.vehicles,
-          ...incoming.vehicles.filter(v => !existingVehicleIds.has(v.id)),
-        ],
-        fuelEntries: [
-          ...data.fuelEntries,
-          ...incoming.fuelEntries.filter(e => !existingFuelIds.has(e.id)),
-        ],
-        expenseEntries: [
-          ...data.expenseEntries,
-          ...incoming.expenseEntries.filter(e => !existingExpIds.has(e.id)),
-        ],
-      };
-    }
-
-    const result = await onSave(newData);
+    const mode = importState.mergeMode;
+    if (!mode) { setImporting(false); return; }
+    const result = await restoreBackup(importState.preview, mode, onSave);
     setImporting(false);
     if (result.ok) {
       toast.show(
@@ -134,7 +108,7 @@ export function DashboardScreen({ data, selectedVehicleId, onSave, onNavigateVeh
           : "Backup merged into existing data",
         { variant: "success" }
       );
-      setImportState({ step: "idle", parseError: null, preview: null, mergeMode: "replace" });
+      setImportState({ step: "idle", parseError: null, preview: null, mergeMode: "" });
       setShowBackup(false);
     } else {
       toast.show(`Import failed: ${result.reason}`, { variant: "error" });
@@ -365,7 +339,7 @@ export function DashboardScreen({ data, selectedVehicleId, onSave, onNavigateVeh
       {showBackup && (
         <Modal title="Backup & Restore" onClose={() => {
           setShowBackup(false);
-          setImportState({ step: "idle", parseError: null, preview: null, mergeMode: "replace" });
+          setImportState({ step: "idle", parseError: null, preview: null, mergeMode: "" });
         }} wide>
           <div className="flex flex-col gap-6">
             {/* Export section */}
@@ -485,10 +459,10 @@ export function DashboardScreen({ data, selectedVehicleId, onSave, onNavigateVeh
                         </button>
                         <button
                           onClick={handleImportConfirm}
-                          disabled={importing}
+                          disabled={importing || !importState.mergeMode}
                           className="flex-1 py-2.5 rounded-[0.75rem] bg-[var(--accent)] text-white text-sm font-semibold min-h-[44px] hover:bg-[var(--accent-hover,var(--accent))] transition-colors disabled:opacity-60"
                         >
-                          {importing ? "Importing…" : importState.mergeMode === "replace" ? "Replace all data" : "Merge data"}
+                          {importing ? "Importing…" : !importState.mergeMode ? "Choose import mode" : importState.mergeMode === "replace" ? "Replace all data" : "Merge data"}
                         </button>
                       </div>
                     </>
