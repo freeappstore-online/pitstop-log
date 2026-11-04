@@ -42,7 +42,8 @@ export function computeVehicleStats(vehicleId: string, data: AppData): VehicleSt
 
   const avgL100km =
     consumption.length > 0
-      ? consumption.reduce((s, c) => s + c.l100km, 0) / consumption.length
+      ? (consumption.reduce((s, c) => s + c.litres, 0) /
+          consumption.reduce((s, c) => s + c.distanceKm, 0)) * 100
       : null;
 
   const lastOdometer =
