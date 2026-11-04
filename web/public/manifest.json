@@ -1,0 +1,20 @@
+{
+  "name": "Pitstop Log",
+  "short_name": "Pitstop Log",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2563eb",
+  "orientation": "any",
+  "id": "/",
+  "scope": "/",
+  "min_viewport_width": 320,
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

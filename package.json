@@ -1,0 +1,20 @@
+{
+  "name": "pitstop-log",
+  "private": true,
+  "packageManager": "pnpm@10.30.3",
+  "engines": {
+    "node": ">=22"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  },
+  "scripts": {
+    "dev": "pnpm --filter @pitstop-log/web dev",
+    "build": "pnpm --filter @pitstop-log/web build",
+    "preview": "pnpm --filter @pitstop-log/web preview",
+    "typecheck": "pnpm --filter @pitstop-log/web exec tsc -b",
+    "test": "pnpm --filter @pitstop-log/web test"
+  }
+}
