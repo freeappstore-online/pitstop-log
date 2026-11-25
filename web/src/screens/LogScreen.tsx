@@ -18,6 +18,12 @@ interface Props {
 
 type Tab = "fuel" | "expenses";
 
+/** Today's local calendar date as YYYY-MM-DD (toISOString would give the UTC date). */
+function todayLocal(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 function uid() {
   return `e-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -42,7 +48,7 @@ interface FuelErrors {
 
 function emptyFuelForm(): FuelForm {
   return {
-    date: new Date().toISOString().slice(0, 10),
+    date: todayLocal(),
     odometer: "",
     litres: "",
     totalCost: "",
@@ -117,7 +123,7 @@ interface ExpenseErrors {
 
 function emptyExpenseForm(): ExpenseForm {
   return {
-    date: new Date().toISOString().slice(0, 10),
+    date: todayLocal(),
     category: "service",
     amount: "",
     description: "",
